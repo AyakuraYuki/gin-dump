@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// Dump the requests and responses in os.Stdout
 func Dump() gin.HandlerFunc {
 	return dump(&options{
 		showReq:     defaultShowReq,
@@ -24,6 +25,9 @@ func Dump() gin.HandlerFunc {
 	})
 }
 
+// DumpFunc dumps the requests and responses, passes the dumped information
+// to your callback function, allowing you to consume the dumped information
+// in your own way.
 func DumpFunc(cb Callback) gin.HandlerFunc {
 	return dump(&options{
 		showReq:     defaultShowReq,
@@ -36,6 +40,10 @@ func DumpFunc(cb Callback) gin.HandlerFunc {
 	})
 }
 
+// DumpWithOptions allows you to highly customize the middleware, such as
+// dumping only requests or responses, dumping only the Header sections or
+// body data within requests/responses, and using customized callback
+// methods, among other configurations.
 func DumpWithOptions(opts ...Option) gin.HandlerFunc {
 	option := &options{
 		showReq:     defaultShowReq,
@@ -102,18 +110,17 @@ func dump(option *options) gin.HandlerFunc {
 					}
 
 					if option.showRaw {
-						strB.WriteString("\nRequest-Body (raw):\n")
+						strB.WriteString("\nRequest-Body:\n")
 						strB.WriteString(string(bts) + "\n")
+					} else {
+						s, err := FormatJsonBytes(bts, hiddenBody, false)
+						if err != nil {
+							strB.WriteString(fmt.Sprintf("\nparse request body err: %s\n", err.Error()))
+							goto DumpRes
+						}
+						strB.WriteString("\nRequest-Body:\n")
+						strB.WriteString(string(s) + "\n")
 					}
-
-					s, err := FormatJsonBytes(bts, hiddenBody, false)
-					if err != nil {
-						strB.WriteString(fmt.Sprintf("\nparse request body err: %s\n", err.Error()))
-						goto DumpRes
-					}
-
-					strB.WriteString("\nRequest-Body:\n")
-					strB.WriteString(string(s) + "\n")
 
 				case gin.MIMEPOSTForm:
 					bts, err := io.ReadAll(rdr)
@@ -123,28 +130,28 @@ func dump(option *options) gin.HandlerFunc {
 					}
 
 					if option.showRaw {
-						strB.WriteString("\nRequest-Body (raw):\n")
+						strB.WriteString("\nRequest-Body:\n")
 						strB.WriteString(string(bts) + "\n")
+					} else {
+						val, err := url.ParseQuery(string(bts))
+						s, err := FormatToJson(val, hiddenBody, false)
+						if err != nil {
+							strB.WriteString(fmt.Sprintf("\nparse request body err: %s\n", err.Error()))
+							goto DumpRes
+						}
+						strB.WriteString("\nRequest-Body:\n")
+						strB.WriteString(string(s) + "\n")
 					}
-
-					val, err := url.ParseQuery(string(bts))
-					s, err := FormatToJson(val, hiddenBody, false)
-					if err != nil {
-						strB.WriteString(fmt.Sprintf("\nparse request body err: %s\n", err.Error()))
-						goto DumpRes
-					}
-					strB.WriteString("\nRequest-Body:\n")
-					strB.WriteString(string(s) + "\n")
 
 				case gin.MIMEMultipartPOSTForm:
 				default:
 				}
 			}
 
-		DumpRes:
-			ctx.Writer = &bodyWriter{bodyCache: bytes.NewBufferString(""), ResponseWriter: ctx.Writer}
-			ctx.Next()
 		}
+	DumpRes:
+		ctx.Writer = &bodyWriter{bodyCache: bytes.NewBufferString(""), ResponseWriter: ctx.Writer}
+		ctx.Next()
 
 		if option.showRsp && option.showHeaders {
 			// dump response header
@@ -175,12 +182,7 @@ func dump(option *options) gin.HandlerFunc {
 				}
 				switch ct {
 				case gin.MIMEJSON:
-					cachedBs := bw.bodyCache.Bytes()
-					if option.showRaw {
-						strB.WriteString("\nResponse-Body (raw):\n")
-						strB.WriteString(string(cachedBs) + "\n")
-					}
-					s, err := FormatJsonBytes(cachedBs, hiddenBody, false)
+					s, err := FormatJsonBytes(bw.bodyCache.Bytes(), hiddenBody, false)
 					if err != nil {
 						strB.WriteString(fmt.Sprintf("\nparse bodyCache err: %s\n", err.Error()))
 						goto End
